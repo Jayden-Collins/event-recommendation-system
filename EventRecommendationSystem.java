@@ -1,3 +1,5 @@
+package eventrecommendationsystem;
+
 import java.io.*;
 import java.util.*;
 
@@ -75,22 +77,22 @@ class Category extends Vertex {
 class Edge implements Serializable {
     private final Vertex from;
     private final Vertex to;
-    private final Double weight; // null if unweighted
-
+    private final double weight;
+    
     public Edge(Vertex from, Vertex to) {
-        this(from, to, null);
+        this(from, to, 1.0); // default weight
     }
-
-    public Edge(Vertex from, Vertex to, Double weight) {
+    
+    public Edge(Vertex from, Vertex to, double weight) {
         this.from = from;
         this.to = to;
         this.weight = weight;
     }
-
+    
     public Vertex getFrom() { return from; }
     public Vertex getTo() { return to; }
-    public Double getWeight() { return weight; }
-
+    public double getWeight() { return weight; }
+    
     @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;
@@ -98,11 +100,12 @@ class Edge implements Serializable {
         Edge edge = (Edge) obj;
         return Objects.equals(from, edge.from) && Objects.equals(to, edge.to);
     }
-
+    
     @Override
     public int hashCode() {
         return Objects.hash(from, to);
     }
+
 }
 
 // Graph class to manage all vertices and edges
@@ -141,19 +144,21 @@ class EventGraph implements Serializable {
         }
     }
     
-
-    // Add unweighted edge
     public void addEdge(Vertex from, Vertex to) {
-        Edge edge = new Edge(from, to);
-        from.addEdge(edge);
+        addEdge(from, to, 1.0);
     }
-
-    // Add weighted edge
-    public void addEdge(Vertex from, Vertex to, Double weight) {
+    
+    public void addEdge(Vertex from, Vertex to, double weight) {
         Edge edge = new Edge(from, to, weight);
         from.addEdge(edge);
     }
     
+    public void addFriendship(User user1, User user2) {
+        addEdge(user1, user2, 1.0);  
+        addEdge(user2, user1, 1.0);  
+        System.out.println("Friendship created between " + user1.getId() + " and " + user2.getId());
+    }
+
     public void removeEdge(Vertex from, Vertex to) {
         Edge edgeToRemove = null;
         for (Edge edge : from.getEdges()) {
@@ -185,15 +190,18 @@ class EventGraph implements Serializable {
         // Get user's preferred category based on attended events
         Set<String> preferredCategories = getUserPreferredCategories(user);
         
-        if (preferredCategories.isEmpty()) {
-            // Prompt user to select preferred categories
-            return recommendations; // No preferences, return empty list
-        }
-        
         // Start from user
         queue.add(user);
         visited.add(user);
         depths.put(user, 0);
+        
+        for (Event event : user.getAttendedEvents()) {
+            if (!visited.contains(event)) {
+                queue.add(event);
+                visited.add(event);
+                depths.put(event, 1);
+            }
+        }
         
         while (!queue.isEmpty()) {
             Vertex current = queue.poll();
@@ -206,25 +214,40 @@ class EventGraph implements Serializable {
             for (Edge edge : current.getEdges()) {
                 Vertex neighbor = edge.getTo();
                 
-                if (!visited.contains(neighbor)) {
+                if (visited.contains(neighbor)) {
+                    continue;
+                }
+                    
+                if (current instanceof User friend && neighbor instanceof Event event) {
+                    double rating = edge.getWeight(); // Assuming rating is stored as edge weight
+                    // Only recommend events with a high rating from the friend and that the user hasn't attended
+                    if (rating >= 3 && !user.getAttendedEvents().contains(event) && !recommendations.contains(event)) {
+                        recommendations.add(event);
+                    }   
+                } else if (neighbor instanceof Category || (neighbor instanceof User && neighbor != user)) {
                     visited.add(neighbor);
                     depths.put(neighbor, currentDepth + 1);
                     queue.add(neighbor);
-                    
-                    // Check if this is an event in the preferred category
-                    if (neighbor instanceof Event event) {
-                        boolean matchesPreferred = false;
-                        for (String category : event.getCategories()) {
-                            if (preferredCategories.contains(category)) {
-                                matchesPreferred = true;
-                                break;
-                            }
-                        }
-                        if (matchesPreferred && 
-                            !user.getAttendedEvents().contains(event)) {
-                            recommendations.add(event);
+                }  else if (current instanceof Category && neighbor instanceof Event event) {
+                    // Check if the event's category is one of the user's preferred categories
+                    boolean matchesPreferred = false;
+                    for (String category : event.getCategories()) {
+                        if (preferredCategories.contains(category)) {
+                            matchesPreferred = true;
+                            break;
                         }
                     }
+                        
+                    if (matchesPreferred && 
+                        !user.getAttendedEvents().contains(event) &&
+                        !recommendations.contains(event)) {
+                        recommendations.add(event);
+                    }
+                }
+                if (!(neighbor instanceof Event)) {
+                    visited.add(neighbor);
+                    depths.put(neighbor, currentDepth + 1);
+                    queue.add(neighbor);
                 }
             }
         }
@@ -236,9 +259,8 @@ class EventGraph implements Serializable {
         Set<String> categories = new HashSet<>();
         
         for (Event event : user.getAttendedEvents()) {
-            for (String category : event.getCategories()) {
-                categories.add(category);
-            }
+                categories.addAll(event.getCategories());
+            
         }
 
         return categories;
@@ -299,12 +321,12 @@ public class EventRecommendationSystem {
         addEvent("PythonWorkshop", Arrays.asList("workshops"));
         addEvent("AI Bootcamp", Arrays.asList("workshops"));
 
-        recordAttendance("A", "ComedyClash");
-        recordAttendance("B", "FantasticDuoConcert");
-        recordAttendance("B", "VarietyCharityConcert");
-        recordAttendance("C", "PythonWorkshop");
-        recordAttendance("C", "AI Bootcamp");
-        recordAttendance("C", "Mads Comedy Night");
+        recordAttendance("A", "ComedyClash", 4);
+        recordAttendance("B", "FantasticDuoConcert", 5);
+        recordAttendance("B", "VarietyCharityConcert", 3);
+        recordAttendance("C", "PythonWorkshop", 4);
+        recordAttendance("C", "AI Bootcamp", 3);
+        recordAttendance("C", "Mads Comedy Night", 5);
 
         graph.saveToFile(dataFile);
     }
@@ -386,57 +408,23 @@ public class EventRecommendationSystem {
         }
     }
     
-    public void recordAttendance(String userId, String eventId) {
+    public void recordAttendance(String userId, String eventId, int rating) {
         Vertex userVertex = graph.getVertex(userId);
         Vertex eventVertex = graph.getVertex(eventId);
-
+        
         if (userVertex instanceof User && eventVertex instanceof Event) {
             User user = (User) userVertex;
             Event event = (Event) eventVertex;
-
-            // Prompt for rating
-            Scanner scanner = new Scanner(System.in);
-            double rating = -1;
-            while (rating < 0 || rating > 5) {
-                System.out.print("Enter your rating for the event (0-5): ");
-                String input = scanner.nextLine();
-                try {
-                    rating = Double.parseDouble(input);
-                    if (rating < 0 || rating > 5) {
-                        System.out.println("Invalid rating. Please enter a value between 0 and 5.");
-                    }
-                } catch (NumberFormatException e) {
-                    System.out.println("Invalid input. Please enter a number.");
-                }
-            }
-
-            // Add weighted edge from user to event
-            graph.addEdge(user, event, rating);
-
+            
             // Record attendance in user's history
             user.addAttendedEvent(event);
-
+            
+            graph.addEdge(user, event, rating);
+            
             graph.saveToFile(dataFile);
+            System.out.println("Attendance recorded with rating " + rating + ".");
         } else {
-            if (!(userVertex instanceof User)) {
-                System.out.println("User does not exist.");
-            } else {
-                System.out.println("Event does not exist.");
-            }
-        }
-    }
-    // Add friendship (bidirectional) between users
-    public void addFriendship(String userId1, String userId2) {
-        Vertex v1 = graph.getVertex(userId1);
-        Vertex v2 = graph.getVertex(userId2);
-        if (v1 instanceof User && v2 instanceof User) {
-            // Add bidirectional edges (unweighted)
-            graph.addEdge(v1, v2);
-            graph.addEdge(v2, v1);
-            graph.saveToFile(dataFile);
-            System.out.println("Friendship added between " + userId1 + " and " + userId2 + ".");
-        } else {
-            System.out.println("Both users must exist to add friendship.");
+            System.out.println("Invalid user or event.");
         }
     }
     
@@ -609,6 +597,20 @@ public class EventRecommendationSystem {
         }
         return choice;
     }
+    
+    private int getRatingInput(Scanner scanner) {
+        int rating = -1;
+        while (true) {
+            System.out.print("Enter rating (1-5): ");  // Specific for ratings
+            String input = scanner.nextLine();
+            try {
+                rating = Integer.parseInt(input);
+                if (rating >= 1 && rating <= 5) break;
+            } catch (NumberFormatException ignored) {}
+            System.out.println("Invalid rating. Please enter a number between 1-5.");
+        }
+        return rating;
+    }
 
     // Pause for user input before clearing screen
     private static void pauseForUser(Scanner scanner) {
@@ -645,29 +647,17 @@ public class EventRecommendationSystem {
             System.out.println("2. Remove User");
             System.out.println("3. Add Event");
             System.out.println("4. Add Category");
-            System.out.println("5. Record Attendance");
-            System.out.println("6. Recommend Events");
-            System.out.println("7. Remove Category");
-            System.out.println("8. Remove Event");
-            System.out.println("9. View Graph");
-            System.out.println("10. Exit");
-            System.out.println("11. Add Friendship (between users)");
+            System.out.println("5. Recommend Events");
+            System.out.println("6. Remove Category");
+            System.out.println("7. Remove Event");
+            System.out.println("8. View Graph");
+            System.out.println("9. Add Friendship");
+            System.out.println("10. Record Attendance with Rating");
+            System.out.println("0. Exit");
             System.out.print("Enter choice: ");
             command = scanner.nextLine();
 
             switch (command) {
-                case "11" -> {
-                    // Add friendship
-                    String user1 = system.selectUser(scanner, "Select first user for friendship:");
-                    String user2 = system.selectUser(scanner, "Select second user for friendship:");
-                    if (user1 != null && user2 != null && !user1.equals(user2)) {
-                        system.addFriendship(user1, user2);
-                    } else {
-                        System.out.println("Invalid users selected or same user chosen.");
-                    }
-                    pauseForUser(scanner);
-                    clearScreen();
-                }
                 case "1" -> {
                     String username = system.getNameInput(scanner, "Enter new User Name: ");
                     system.addUser(username);
@@ -694,17 +684,10 @@ public class EventRecommendationSystem {
                     clearScreen();
                 }
                 case "5" -> {
-                    String username = system.selectUser(scanner, "Select User:");
-                    String eventName = system.selectEvent(scanner, "Select Event:");
-                    if (username != null && eventName != null) system.recordAttendance(username, eventName);
-                    pauseForUser(scanner);
-                    clearScreen();
-                }
-                case "6" -> {
                     String username = system.selectUser(scanner, "Select User for recommendations:");
                     clearScreen();
                     if (username != null) {
-                        List<Event> recommendations = system.recommendEvents(username, 6, scanner);
+                        List<Event> recommendations = system.recommendEvents(username, 3, scanner);
                         if (recommendations.isEmpty()) {
                             System.out.println("No recommendations available.");
                         } else {
@@ -717,19 +700,19 @@ public class EventRecommendationSystem {
                     pauseForUser(scanner);
                     clearScreen();
                 }
-                case "7" -> {
+                case "6" -> {
                     String category = system.selectCategory(scanner, "Select Category to remove:");
                     if (category != null) system.removeCategory(category);
                     pauseForUser(scanner);
                     clearScreen();
                 }
-                case "8" -> {
+                case "7" -> {
                     String event = system.selectEvent(scanner, "Select Event to remove:");
                     if (event != null) system.removeEvent(event);
                     pauseForUser(scanner);
                     clearScreen();
                 }
-                case "9" -> {
+                case "8" -> {
                     clearScreen();
                     Map<String, List<String>> adjList = system.getAdjacencyList();
                     System.out.println("Adjacency List:");
@@ -739,15 +722,43 @@ public class EventRecommendationSystem {
                     pauseForUser(scanner);
                     clearScreen();
                 }
-                case "10" -> System.out.println("Exiting...");
+                case "9" -> {
+                    String user1 = system.selectUser(scanner, "Select first user:");
+                    String user2 = system.selectUser(scanner, "Select second user:");
+                    if (user1 != null && user2 != null && !user1.equals(user2)) {
+                        User u1 = (User) system.graph.getVertex(user1);
+                        User u2 = (User) system.graph.getVertex(user2);
+                        system.graph.addFriendship(u1, u2);
+                        system.graph.saveToFile(system.dataFile);
+                    }
+                    pauseForUser(scanner);
+                    clearScreen();
+                }
+                case "10" -> {
+                    String username = system.selectUser(scanner, "Select User:");
+                    String eventName = system.selectEvent(scanner, "Select Event:");
+                    if (username != null && eventName != null) {
+                        int rating = system.getRatingInput(scanner);
+                        system.recordAttendance(username, eventName, rating);
+                    }
+                    pauseForUser(scanner);
+                    clearScreen();
+                }
+                case "0" -> {
+                    System.out.println("Exiting...");
+                    return;
+                }
                 default -> {
                     System.out.println("Invalid command. Please try again.");
                     pauseForUser(scanner);
                     clearScreen();
                 }
             }
-        } while (!command.equals("10"));
+        } while (!command.equals("12"));
 
         scanner.close();
     }
 }
+
+
+
