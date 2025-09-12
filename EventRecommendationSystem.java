@@ -642,7 +642,9 @@ public class EventRecommendationSystem {
         String command;
 
         do {
-            System.out.println("\nMenu:");
+            System.out.println("=================================");
+            System.out.println("   Event Recommendation System   ");
+            System.out.println("=================================");
             System.out.println("1. Add User");
             System.out.println("2. Remove User");
             System.out.println("3. Add Event");
